@@ -10,13 +10,14 @@ from typing import Optional
 import numpy as np
 import torch
 import triton
-from parameterized import parameterized
+#from parameterized import parameterized
 import pytest
 
 from flashnn.triton_kernels.paged_attn import (
     paged_attn_w_mma,
     paged_attn_w_mma_transv,
-    paged_attn_wo_mma, 
+    paged_attn_w_mma_transv_transk,
+    paged_attn_wo_mma,
     paged_attn_w_mma_unrolling4
 )
 
@@ -118,14 +119,14 @@ def get_input_shapes():
     # (1, 16384, 52,4),
     # (64,1024, 52, 4),
     # (64,16384, 52, 4),
-    # (1, 1024, 8 ,1),
-    # (1, 2048, 8 ,1),
-    # (1, 4096, 8 ,1),
-    # (1, 8192, 8 ,1),
-    # (1, 16384, 8, 1),
+    (1, 1024, 8 ,1),
+    (1, 2048, 8 ,1),
+    (1, 4096, 8 ,1),
+    (1, 8192, 8 ,1),
+    (1, 16384, 8, 1),
     # (64,1024, 8, 1),
     # (64,16384, 8, 1),
-    (64, 16384, 32, 4),
+    #(64, 16384, 32, 4),
     ]
     return test_cases
 
@@ -140,13 +141,13 @@ configs.append(
         x_vals=get_input_shapes(),
         line_arg="provider",
         line_vals=(
-            ["triton_mma_transv"]
+            ["triton_mma", "triton_mma_transv", "triton_mma_transv_transk"]
             # ["triton_fma", "triton_mma", "triton_mma_transv", "triton_mma_unrolling4"]
             # + (["vllm_v1", "vllm_v2"] if HAS_VLLM else [])
             + (["vllm_custom"] if HAS_VLLM_CUSTOM_PAGED else [])
         ),
         line_names=(
-            ["TriMMATransV"]
+            ["TritonMMA", "TriMMATransV", "TriMMATransVTransK"]
             # ["Triton FMA", "TritonMMA", "TriMMATransV", "MMA Unroll4"]
             # + (["vLLM_V1", "vLLM_V2"] if HAS_VLLM else [])
             + (["vLLM_CUSTOM"] if HAS_VLLM_CUSTOM_PAGED else [])
@@ -226,6 +227,7 @@ def benchmark(
     out = torch.empty_like(query)
 
     key_cache_tri = key_cache.permute(0, 1, 3, 2, 4).flatten(3, 4).contiguous().cuda()
+    key_cache_tri_transk = key_cache_tri.transpose(2, 3)
     value_cache_tri = value_cache.permute(0, 1, 3, 2).contiguous().cuda()
     quantiles = [0.5, 0.2, 0.8]
 
@@ -306,6 +308,41 @@ def benchmark(
                 out,
                 query,
                 key_cache_tri,
+                value_cache_tri_transv,
+                context_lens,
+                block_tables,
+                scale,
+                max_context_len,
+                num_splits,
+                partition_size,
+                device,
+            ),
+            warmup=20,
+            rep=100,
+            quantiles=quantiles,
+        )
+
+    if provider == "triton_mma_transv_transk":
+        value_cache_tri_transv = value_cache.permute(0, 1, 3, 2)
+        #paged_attn_w_mma_transv_transk(
+        #        out,
+        #        query,
+        #        key_cache_tri_transk,
+        #        value_cache_tri_transv,
+        #        context_lens,
+        #        block_tables,
+        #        scale,
+        #        max_context_len,
+        #        num_splits,
+        #        partition_size,
+        #        device,
+            #)
+        #ms, min_ms, max_ms = 0, 0, 0
+        ms, min_ms, max_ms = triton.testing.do_bench(
+            lambda: paged_attn_w_mma_transv_transk(
+                out,
+                query,
+                key_cache_tri_transk,
                 value_cache_tri_transv,
                 context_lens,
                 block_tables,
