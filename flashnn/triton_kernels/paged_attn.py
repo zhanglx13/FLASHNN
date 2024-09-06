@@ -821,7 +821,7 @@ def paged_attn_w_mma_transv_transk(
 @triton.autotune(
     configs=[
         triton.Config({}, num_stages=stages, num_warps=warps)
-        for stages in [1]
+        for stages in [2]
         for warps in [4]
     ],
     key=["QUERY_GROUP_SIZE", "HEAD_SIZE", "KV_BLOCK_SIZE"],
@@ -924,10 +924,11 @@ def _paged_attn_w_mma_kernel_transv_transk(
         # Load a key block.
         k_block_offset = block_number * stride_k0 + k_offset
         mask_offset = block_idx * KV_BLOCK_SIZE + block_offset
-        kv_mask = mask_offset[None,:] < context_len
+        #kv_mask = mask_offset[None,:] < context_len
 
         # k: [KV_BLOCK_SIZE, HEAD_SIZE]
-        k = tl.load(k_cache_ptr + k_block_offset, mask=kv_mask, other=0.0)
+        #k = tl.load(k_cache_ptr + k_block_offset, mask=kv_mask, other=0.0)
+        k = tl.load(k_cache_ptr + k_block_offset)
 
         # qk: [PADDED_QUERY_GROUP_SIZE, KV_BLOCK_SIZE]
         #if PADDED_QUERY_GROUP_SIZE == 1:
@@ -947,8 +948,9 @@ def _paged_attn_w_mma_kernel_transv_transk(
 
         # v: [KV_BLOCK_SIZE, HEAD_SIZE]
         v_block_offset = block_number * stride_v0 + v_offset
-        kv_mask = mask_offset[:, None] < context_len
-        v = tl.load(v_cache_ptr + v_block_offset, mask=kv_mask, other=0.0)
+        #kv_mask = mask_offset[:, None] < context_len
+        #v = tl.load(v_cache_ptr + v_block_offset, mask=kv_mask, other=0.0)
+        v = tl.load(v_cache_ptr + v_block_offset)
 
         if PADDED_QUERY_GROUP_SIZE == 1:
             acc += tl.sum(p.T[:, :, None] * v[:, None, :], axis=0)
